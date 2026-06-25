@@ -7,7 +7,7 @@
 
 .Notes   
     Version:     8.0
-    Date:        14/05/2026
+    Date:        24/06/2026
     Written by:  Michael Fowler
     Contact:     michael.fowler@checkmarx.com
     
@@ -48,6 +48,7 @@
     7.9        Added ReCalc Status field to scan object
     8.0        Updated serializer to allow for larger data sets
     8.1        Bug fix
+    8.2        Added try catch block to handle errors on duplicate scans returned by API
     
 .Description
     The following functions are available for this module
@@ -1404,7 +1405,10 @@ class Scans {
                 $this.TotalCount = $json.totalCount   
             }
 
-            foreach ($scan in $json.scans) { $this.ScansHash.Add($scan.id, [Scan]::new($scan)) }
+            foreach ($scan in $json.scans) { 
+                try { $this.ScansHash.Add($scan.id, [Scan]::new($scan)) } 
+                catch { Write-Output $scan }
+            } 
 
             Write-Verbose "$($this.Limit) Scans Retrieved with Offset: $($this.Offset)"
             $this.Offset += $this.Limit
@@ -1875,11 +1879,6 @@ class SeverityCount {
         [Int]$TotalMedium
         [Int]$TotalLow
         [Int]$TotalInfo
-        [Int]$TotalToVerify
-        [Int]$TotalNotExploitable
-        [Int]$TotalProposedNotExploitable
-        [Int]$TotalConfirmed
-        [Int]$TotalUrgent
 
     #endregion
     #------------------------------------------------------------------------------------------------------------------------------------------------
@@ -1894,13 +1893,13 @@ class SeverityCount {
     [void] Hidden SetVariables([Array]$summary) {
                 
         $this.Sast = $this.CreateHashAndIncrementTotal($summary.sastCounters.totalCounter)    
-        $this.SetCounts($summary.sastCounters.severityCounters, $summary.sastCounters.stateCounters, $this.Sast)
+        $this.SetCounts($summary.sastCounters.severityCounters, $this.Sast)
 
         $this.Kics = $this.CreateHashAndIncrementTotal($summary.kicsCounters.totalCounter) 
-        $this.SetCounts($summary.kicsCounters.severityCounters, $summary.kicsCounters.stateCounters, $this.Kics)
+        $this.SetCounts($summary.kicsCounters.severityCounters, $this.Kics)
 
         $this.Sca = $this.CreateHashAndIncrementTotal($summary.scaCounters.totalCounter)
-        $this.SetCounts($summary.scaCounters.severityCounters, $summary.scaCounters.stateCounters,  $this.Sca)
+        $this.SetCounts($summary.scaCounters.severityCounters, $this.Sca)
         
         $this.Packages = $this.CreateHashAndIncrementTotal($summary.scaPackagesCounters.totalCounter)
         if ($summary.scaPackagesCounters.totalPackagesCounter) { 
@@ -1911,16 +1910,16 @@ class SeverityCount {
             $this.Packages.Add("Outdated Packages", $summary.scaPackagesCounters.outdatedCounter)
         }
         else { $this.Packages.Add("Outdated Packages", $null) }
-        $this.SetCounts($summary.scaPackagesCounters.severityCounters, $summary.scaPackagesCounters.stateCounters, $this.Packages)
+        $this.SetCounts($summary.scaPackagesCounters.severityCounters, $this.Packages)
 
         $this.Api = $this.CreateHashAndIncrementTotal($summary.apiSecCounters.totalCounter)
-        $this.SetCounts($summary.apiSecCounters.severityCounters, $summary.apiSecCounters.stateCounters, $this.Api)
+        $this.SetCounts($summary.apiSecCounters.severityCounters, $this.Api)
 
         $this.SSCS = $this.CreateHashAndIncrementTotal($summary.microEnginesCounters.totalCounter)
-        $this.SetCounts($summary.microEnginesCounters.severityCounters, $summary.microEnginesCounters.stateCounters, $this.SSCS)
+        $this.SetCounts($summary.microEnginesCounters.severityCounters, $this.SSCS)
 
         $this.Containers = $this.CreateHashAndIncrementTotal($summary.containersCounters.totalCounter)
-        $this.SetCounts($summary.containersCounters.severityCounters, $summary.containersCounters.stateCounters, $this.Containers)
+        $this.SetCounts($summary.containersCounters.severityCounters, $this.Containers)
 
         $this.Totals = @{
             total = $this.Total
@@ -1928,13 +1927,7 @@ class SeverityCount {
             High = $this.TotalHigh
             Medium = $this.TotalMedium
             Low = $this.TotalLow
-            Info = $this.TotalInfo     
-            ToVerify = $this.TotalToVerify
-            NotExploitable = $this.TotalNotExploitable
-            ProposedNotExploitable = $this.TotalProposedNotExploitable
-            Confirmed = $this.TotalConfirmed
-            Urgent = $this.TotalUrgent
-            
+            Info = $this.TotalInfo
         }
     }
 
@@ -1948,15 +1941,10 @@ class SeverityCount {
                 Medium = $null
                 Low = $null
                 Info = $null
-                ProposedNotExploitable = $null
-                Confirmed = $null
-                NotExploitable = $null
-                ToVerify = $null
-                Urgent = $null
         }
     }
 
-    [void] Hidden SetCounts([Array]$severityCounter, [Array]$stateCounter, [Hashtable]$hash) {
+    [void] Hidden SetCounts([Array]$severityCounter, [Hashtable]$hash) {
         foreach ($sc in $severityCounter) {
             switch ($sc.severity) {
                 'CRITICAL' { 
@@ -1978,31 +1966,6 @@ class SeverityCount {
                 'INFO' { 
                     $hash.Info = $sc.counter
                     $this.TotalInfo += $sc.counter
-                }
-            }
-        }
-        
-        foreach ($sc in $stateCounter) {          
-            switch ($sc.state) {
-                'PROPOSED_NOT_EXPLOITABLE' { 
-                    $hash.ProposedNotExploitable = $sc.counter
-                    $this.TotalProposedNotExploitable += $sc.counter
-                }
-                'CONFIRMED' { 
-                    $hash.Confirmed = $sc.counter
-                    $this.TotalConfirmed += $sc.counter
-                }
-                'NOT_EXPLOITABLE' { 
-                    $hash.NotExploitable = $sc.counter
-                    $this.TotalNotExploitable += $sc.counter
-                }
-                'TO_VERIFY' { 
-                    $hash.ToVerify = $sc.counter
-                    $this.TotalToVerify += $sc.counter
-                }
-                'URGENT' { 
-                    $hash.Urgent = $sc.counter
-                    $this.TotalUrgent += $sc.counter
                 }
             }
         }
